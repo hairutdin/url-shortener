@@ -3,13 +3,12 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"io"
 	"net/http"
-	"strings"
 	"sync"
+
+	"github.com/gin-gonic/gin"
 )
 
-// For saving URL we will use map
 var urlStore = struct {
 	sync.RWMutex
 	m map[string]string
@@ -28,64 +27,47 @@ func generateShortURL() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-func handleRequest(res http.ResponseWriter, req *http.Request) {
-	if req.Method == http.MethodPost {
-		handlePost(res, req)
-	} else if req.Method == http.MethodGet {
-		handleGet(res, req)
-	} else {
-		http.Error(res, "Invalid method", http.StatusBadRequest)
+func handlePost(c *gin.Context) {
+	var requestBody struct {
+		URL string `json:"url"`
 	}
-}
 
-func handlePost(res http.ResponseWriter, req *http.Request) {
-	// Reading URL from request body
-	body, err := io.ReadAll(req.Body)
-	if err != nil || len(body) == 0 {
-		http.Error(res, "Invalid request body", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&requestBody); err != nil || requestBody.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid URL"})
 		return
 	}
 
-	originalURL := string(body)
-
-	// Generate a short URL
 	shortURL := generateShortURL()
 
-	// Save the URL in the map
 	urlStore.Lock()
-	urlStore.m[shortURL] = originalURL
+	urlStore.m[shortURL] = requestBody.URL
 	urlStore.Unlock()
 
-	// Respond with the short URL
-	res.Header().Set("Content-Type", "text/plain")
-	res.WriteHeader(http.StatusCreated)
-	res.Write([]byte(baseURL + shortURL))
+	c.JSON(http.StatusCreated, gin.H{"short_url": baseURL + shortURL})
 }
 
-func handleGet(res http.ResponseWriter, req *http.Request) {
-	// Reading ID from the URL path
-	id := strings.TrimPrefix(req.URL.Path, "/")
+func handleGet(c *gin.Context) {
+	id := c.Param("id")
 
-	// Retrieve the original URL
 	urlStore.RLock()
 	originalURL, ok := urlStore.m[id]
 	urlStore.RUnlock()
 
 	if !ok {
-		http.Error(res, "URL not found", http.StatusBadRequest)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "URL not found"})
 		return
 	}
 
-	// Redirect to the original URL
-	http.Redirect(res, req, originalURL, http.StatusTemporaryRedirect)
+	c.Redirect(http.StatusTemporaryRedirect, originalURL)
 }
 
 func main() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleRequest)
+	r := gin.Default()
 
-	err := http.ListenAndServe(`:8080`, mux)
-	if err != nil {
+	r.POST("/shorten", handlePost)
+	r.GET("/:id", handleGet)
+
+	if err := r.Run(":8080"); err != nil {
 		panic(err)
 	}
 }

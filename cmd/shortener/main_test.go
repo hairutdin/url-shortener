@@ -5,15 +5,22 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestHandlePost(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://example.com"))
-	req.Header.Set("Content-Type", "text/plain")
+	gin.SetMode(gin.TestMode)
 
 	res := httptest.NewRecorder()
 
-	handlePost(res, req)
+	c, _ := gin.CreateTestContext(res)
+
+	body := `{"url": "https://example.com"}`
+	c.Request = httptest.NewRequest(http.MethodPost, "/shorten", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handlePost(c)
 
 	if res.Code != http.StatusCreated {
 		t.Errorf("Expected status 201, got %d", res.Code)
@@ -25,34 +32,51 @@ func TestHandlePost(t *testing.T) {
 }
 
 func TestHandlePostInvalidBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
-	req.Header.Set("Content-Type", "text/plain")
+	gin.SetMode(gin.TestMode)
 
 	res := httptest.NewRecorder()
 
-	handlePost(res, req)
+	c, _ := gin.CreateTestContext(res)
+
+	body := `{"url": ""}`
+	c.Request = httptest.NewRequest(http.MethodPost, "/shorten", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handlePost(c)
 
 	if res.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", res.Code)
 	}
 
-	if res.Body.String() != "Invalid request body\n" {
-		t.Errorf("Expected 'Invalid request body', got %s", res.Body.String())
+	expectedError := `{"error":"Invalid URL"}`
+	if strings.TrimSpace(res.Body.String()) != expectedError {
+		t.Errorf("Expected 'Expected '%s', got %s", expectedError, res.Body.String())
 	}
 }
 
 func TestHandleGet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
 	shortID := "short12345"
 	originalURL := "https://example.com"
 	urlStore.Lock()
 	urlStore.m[shortID] = originalURL
 	urlStore.Unlock()
 
-	req := httptest.NewRequest(http.MethodGet, "/"+shortID, nil)
-
 	res := httptest.NewRecorder()
 
-	handleGet(res, req)
+	c, r := gin.CreateTestContext(res)
+
+	r.GET("/:id", handleGet)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+shortID, nil)
+	c.Request = req
+
+	r.ServeHTTP(res, req)
+
+	t.Logf("Requested URL ID: %s", shortID)
+	t.Logf("Response Code: %d", res.Code)
+	t.Logf("Response Body: %s", res.Body.String())
 
 	if res.Code != http.StatusTemporaryRedirect {
 		t.Errorf("Expected status 307: got %d", res.Code)
@@ -65,13 +89,21 @@ func TestHandleGet(t *testing.T) {
 }
 
 func TestHandleGetInvalidID(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+	gin.SetMode(gin.TestMode)
 
 	res := httptest.NewRecorder()
 
-	handleGet(res, req)
+	c, _ := gin.CreateTestContext(res)
+
+	c.Request = httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+	handleGet(c)
 
 	if res.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", res.Code)
+	}
+
+	expectedError := `{"error":"URL not found"}`
+	if strings.TrimSpace(res.Body.String()) != expectedError {
+		t.Errorf("Expected 'Expected '%s', got %s", expectedError, res.Body.String())
 	}
 }
