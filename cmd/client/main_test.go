@@ -1,50 +1,46 @@
 package main
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestClientPost(t *testing.T) {
 	// Mock server for testing
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if the method is POST
-		if r.Method != http.MethodPost {
-			t.Errorf("Expected POST method, got %s", r.Method)
-		}
-
-		// Check the content type
-		if r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
-			t.Errorf("Expected content-type application/x-www-form-urlencoded, got %s", r.Header.Get("Content-Type"))
-		}
-
-		// Read the body
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Errorf("Error reading body: %v", err)
-		}
-
-		// Check if the body contains the long URL
-		expectedURL := "url=https%3A%2F%2Fexample.com"
-		if string(body) != expectedURL {
-			t.Errorf("Expected body %s, got %s", expectedURL, string(body))
-		}
-
-		// Respond with a mock short URL
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte("http://localhost:8080/short123"))
 	}))
 	defer mockServer.Close()
 
-	// Simulate input from the console
-	longURL := "https://example.com\n"
-	reader := strings.NewReader(longURL)
+	gin.SetMode(gin.TestMode)
+	router := gin.Default()
+	router.POST("/shorten", shortenURL)
 
-	err := shortenURL(reader, mockServer.URL)
+	// Read the body
+	body := strings.NewReader("url=https://example.com")
+	req, err := http.NewRequest(http.MethodPost, "/shorten", body)
 	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
+		t.Fatalf("Could not create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+
+	// Serve the request
+	router.ServeHTTP(recorder, req)
+
+	// Check if the response status is correct
+	if recorder.Code != http.StatusCreated {
+		t.Errorf("Expected status code %d, got %d", http.StatusCreated, recorder.Code)
+	}
+
+	// Check the response body
+	expectedBody := `{"long_url":"https://example.com","short_url":"http://localhost:8080/short123"}`
+	if recorder.Body.String() != expectedBody {
+		t.Errorf("Expected body %s, got %s", expectedBody, recorder.Body.String())
 	}
 }
