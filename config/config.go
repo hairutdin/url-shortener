@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"os"
 )
 
 type Config struct {
@@ -10,27 +11,38 @@ type Config struct {
 }
 
 var (
-	serverAddressFlag = "localhost:8080"
-	baseURLFlag       = "http://localhost:8080/"
+	defaultServerAddress = "localhost:8080"
+	defaultBaseURL       = "http://localhost:8080/"
 )
 
 var flagParsed = false
 
 func LoadConfig() *Config {
 	if !flagParsed {
-		serverAddress := flag.String("a", serverAddressFlag, "HTTP server address")
-		baseURL := flag.String("b", baseURLFlag, "Base URL for short URLs")
+		serverAddress := os.Getenv("SERVER_ADDRESS")
+		baseURL := os.Getenv("BASE_URL")
+
+		serverAddressFlag := flag.String("a", defaultServerAddress, "HTTP server address")
+		baseURLFlag := flag.String("b", defaultBaseURL, "Base URL for short URLs")
 		flag.Parse()
 		flagParsed = true
 
+		if serverAddress == "" {
+			serverAddress = *serverAddressFlag
+		}
+
+		if baseURL == "" {
+			baseURL = *baseURLFlag
+		}
+
 		return &Config{
-			ServerAddress: *serverAddress,
-			BaseURL:       *baseURL,
+			ServerAddress: serverAddress,
+			BaseURL:       baseURL,
 		}
 	}
 
 	return &Config{
-		ServerAddress: serverAddressFlag,
-		BaseURL:       baseURLFlag,
+		ServerAddress: defaultServerAddress,
+		BaseURL:       defaultBaseURL,
 	}
 }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -42,5 +44,15 @@ func shortenURL(cfg *config.Config) gin.HandlerFunc {
 }
 
 func generateShortURL() (string, error) {
-	return "short123", nil
+	byteLength := 6
+
+	randomBytes := make([]byte, byteLength)
+
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+
+	shortURL := base64.RawURLEncoding.EncodeToString(randomBytes)
+
+	return shortURL, nil
 }
