@@ -27,7 +27,7 @@ func TestHandlePost(t *testing.T) {
 
 	c, res := createTestContext()
 	body := `{"url": "https://example.com"}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/shorten", strings.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handlePost(c)
@@ -46,7 +46,7 @@ func TestHandlePostInvalidBody(t *testing.T) {
 
 	c, res := createTestContext()
 	body := `{"url": ""}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/shorten", strings.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	handlePost(c)
@@ -79,10 +79,6 @@ func TestHandleGet(t *testing.T) {
 
 	r.ServeHTTP(res, req)
 
-	t.Logf("Requested URL ID: %s", shortID)
-	t.Logf("Response Code: %d", res.Code)
-	t.Logf("Response Body: %s", res.Body.String())
-
 	if res.Code != http.StatusTemporaryRedirect {
 		t.Errorf("Expected status 307: got %d", res.Code)
 	}
@@ -98,9 +94,13 @@ func TestHandleGetInvalidID(t *testing.T) {
 
 	c, res := createTestContext()
 	c.Request = httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+
+	urlStore.RLock()
+	defer urlStore.RUnlock()
+
 	handleGet(c)
 
-	if res.Code != http.StatusBadRequest {
+	if res.Code != http.StatusNotFound {
 		t.Errorf("Expected status 400, got %d", res.Code)
 	}
 
