@@ -46,20 +46,20 @@ func handlePost(c *gin.Context) {
 	}
 
 	urlStore.Lock()
+	defer urlStore.Unlock()
 	urlStore.m[shortURL] = requestBody.URL
-	urlStore.Unlock()
 
 	c.JSON(http.StatusCreated, gin.H{"short_url": cfg.BaseURL + shortURL})
 }
 
 func handleGet(c *gin.Context) {
-	id := c.Param("id")
+	shortURL := c.Param("id")
 
 	urlStore.RLock()
-	originalURL, ok := urlStore.m[id]
-	urlStore.RUnlock()
+	defer urlStore.RUnlock()
+	originalURL, exists := urlStore.m[shortURL]
 
-	if !ok {
+	if !exists {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "URL not found"})
 		return
 	}
@@ -72,7 +72,7 @@ func main() {
 
 	r := gin.Default()
 
-	r.POST("/shorten", handlePost)
+	r.POST("/", handlePost)
 	r.GET("/:id", handleGet)
 
 	if err := r.Run(cfg.ServerAddress); err != nil {
