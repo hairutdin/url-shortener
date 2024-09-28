@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"log"
 	"net/http"
+	"os"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -17,13 +19,12 @@ var urlStore = struct {
 	m: make(map[string]string),
 }
 
-func generateShortURL() string {
+func generateShortURL() (string, error) {
 	b := make([]byte, 6)
-	_, err := rand.Read(b)
-	if err != nil {
-		panic(err)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	return base64.URLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func handlePost(c *gin.Context) {
@@ -38,7 +39,11 @@ func handlePost(c *gin.Context) {
 		return
 	}
 
-	shortURL := generateShortURL()
+	shortURL, err := generateShortURL()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate short URL"})
+		return
+	}
 
 	urlStore.Lock()
 	urlStore.m[shortURL] = requestBody.URL
@@ -71,6 +76,7 @@ func main() {
 	r.GET("/:id", handleGet)
 
 	if err := r.Run(cfg.ServerAddress); err != nil {
-		panic(err)
+		log.Fatalf("Failed to start server: %v", err)
+		os.Exit(1)
 	}
 }
