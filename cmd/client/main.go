@@ -18,8 +18,10 @@ func main() {
 }
 
 func shortenURL(c *gin.Context) {
-	longURL := c.PostForm("url")
-	if longURL == "" {
+	var requestBody struct {
+		URL string `json:"url"`
+	}
+	if err := c.ShouldBindJSON(&requestBody); err != nil || requestBody.URL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Empty URL"})
 		return
 	}
@@ -28,7 +30,7 @@ func shortenURL(c *gin.Context) {
 	shortenedURL := cfg.BaseURL + "short123"
 
 	c.JSON(http.StatusCreated, gin.H{
-		"long_url":  longURL,
+		"long_url":  requestBody.URL,
 		"short_url": shortenedURL,
 	})
 }

@@ -60,7 +60,7 @@ func handleGet(c *gin.Context) {
 	originalURL, exists := urlStore.m[shortURL]
 
 	if !exists {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "URL not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "URL not found"})
 		return
 	}
 
@@ -72,7 +72,7 @@ func main() {
 
 	r := gin.Default()
 
-	r.POST("/", handlePost)
+	r.POST("/shorten", handlePost) // Update to /shorten
 	r.GET("/:id", handleGet)
 
 	if err := r.Run(cfg.ServerAddress); err != nil {
