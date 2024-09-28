@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hairutdin/url-shortener/config"
 )
 
 var urlStore = struct {
@@ -15,8 +16,6 @@ var urlStore = struct {
 }{
 	m: make(map[string]string),
 }
-
-const baseURL = "http://localhost:8080/"
 
 func generateShortURL() string {
 	b := make([]byte, 6)
@@ -28,6 +27,8 @@ func generateShortURL() string {
 }
 
 func handlePost(c *gin.Context) {
+	cfg := config.LoadConfig()
+
 	var requestBody struct {
 		URL string `json:"url"`
 	}
@@ -43,7 +44,7 @@ func handlePost(c *gin.Context) {
 	urlStore.m[shortURL] = requestBody.URL
 	urlStore.Unlock()
 
-	c.JSON(http.StatusCreated, gin.H{"short_url": baseURL + shortURL})
+	c.JSON(http.StatusCreated, gin.H{"short_url": cfg.BaseURL + shortURL})
 }
 
 func handleGet(c *gin.Context) {
@@ -62,12 +63,14 @@ func handleGet(c *gin.Context) {
 }
 
 func main() {
+	cfg := config.LoadConfig()
+
 	r := gin.Default()
 
 	r.POST("/shorten", handlePost)
 	r.GET("/:id", handleGet)
 
-	if err := r.Run(":8080"); err != nil {
+	if err := r.Run(cfg.ServerAddress); err != nil {
 		panic(err)
 	}
 }
