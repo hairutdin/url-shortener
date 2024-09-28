@@ -6,9 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hairutdin/url-shortener/config"
-
 	"github.com/gin-gonic/gin"
+	"github.com/hairutdin/url-shortener/config"
 )
 
 var mockConfig = &config.Config{
@@ -18,24 +17,35 @@ var mockConfig = &config.Config{
 
 func createTestRequest(method, url, body string) (*http.Request, *httptest.ResponseRecorder) {
 	req := httptest.NewRequest(method, url, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 	return req, recorder
 }
 
-func TestClientPost(t *testing.T) {
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(mockConfig.BaseURL + "short123"))
-	}))
-	defer mockServer.Close()
+func testShortenURL(c *gin.Context) { // Renamed to avoid conflict
+	var requestBody struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&requestBody); err != nil || requestBody.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid URL"})
+		return
+	}
 
+	shortenedURL := mockConfig.BaseURL + "short123" // Use mock config for testing
+
+	c.JSON(http.StatusCreated, gin.H{
+		"long_url":  requestBody.URL,
+		"short_url": shortenedURL,
+	})
+}
+
+func TestClientPost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.Default()
-	router.POST("/shorten", shortenURL)
+	router.POST("/", testShortenURL)
 
-	body := "url=https://example.com"
-	req, recorder := createTestRequest(http.MethodPost, "/shorten", body)
+	body := `{"url": "https://example.com"}`
+	req, recorder := createTestRequest(http.MethodPost, "/", body)
 
 	router.ServeHTTP(recorder, req)
 

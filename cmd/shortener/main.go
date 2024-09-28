@@ -41,7 +41,7 @@ func handlePost(c *gin.Context) {
 
 	shortURL, err := generateShortURL()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate short URL"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate short URL"})
 		return
 	}
 
@@ -53,11 +53,11 @@ func handlePost(c *gin.Context) {
 }
 
 func handleGet(c *gin.Context) {
-	shortURL := c.Param("id")
+	id := c.Param("id")
 
 	urlStore.RLock()
 	defer urlStore.RUnlock()
-	originalURL, exists := urlStore.m[shortURL]
+	originalURL, exists := urlStore.m[id]
 
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "URL not found"})
@@ -72,7 +72,7 @@ func main() {
 
 	r := gin.Default()
 
-	r.POST("/shorten", handlePost) // Update to /shorten
+	r.POST("/", handlePost)
 	r.GET("/:id", handleGet)
 
 	if err := r.Run(cfg.ServerAddress); err != nil {

@@ -11,26 +11,36 @@ func main() {
 	cfg := config.LoadConfig()
 
 	r := gin.Default()
-	r.POST("/shorten", shortenURL)
+	r.POST("/", shortenURL(cfg))
 	if err := r.Run(cfg.ServerAddress); err != nil {
 		panic(err)
 	}
 }
 
-func shortenURL(c *gin.Context) {
-	var requestBody struct {
-		URL string `json:"url"`
-	}
-	if err := c.ShouldBindJSON(&requestBody); err != nil || requestBody.URL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Empty URL"})
-		return
-	}
+func shortenURL(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var requestBody struct {
+			URL string `json:"url" binding:"required"`
+		}
 
-	cfg := config.LoadConfig()
-	shortenedURL := cfg.BaseURL + "short123"
+		if err := c.ShouldBindJSON(&requestBody); err != nil || requestBody.URL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid URL"})
+			return
+		}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"long_url":  requestBody.URL,
-		"short_url": shortenedURL,
-	})
+		shortenedURL, err := generateShortURL()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate short URL"})
+			return
+		}
+
+		c.JSON(http.StatusCreated, gin.H{
+			"long_url":  requestBody.URL,
+			"short_url": cfg.BaseURL + shortenedURL,
+		})
+	}
+}
+
+func generateShortURL() (string, error) {
+	return "short123", nil
 }
