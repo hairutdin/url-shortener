@@ -1,3 +1,3 @@
 # cmd/shortener
 
-В данной директории будет содержаться код, который скомпилируется в бинарное приложение
+This directory will contain the code that will be compiled into a binary application

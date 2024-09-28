@@ -3,10 +3,13 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"log"
 	"net/http"
+	"os"
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/hairutdin/url-shortener/config"
 )
 
 var urlStore = struct {
@@ -16,18 +19,17 @@ var urlStore = struct {
 	m: make(map[string]string),
 }
 
-const baseURL = "http://localhost:8080/"
-
-func generateShortURL() string {
+func generateShortURL() (string, error) {
 	b := make([]byte, 6)
-	_, err := rand.Read(b)
-	if err != nil {
-		panic(err)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	return base64.URLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func handlePost(c *gin.Context) {
+	cfg := config.LoadConfig()
+
 	var requestBody struct {
 		URL string `json:"url"`
 	}
@@ -37,24 +39,28 @@ func handlePost(c *gin.Context) {
 		return
 	}
 
-	shortURL := generateShortURL()
+	shortURL, err := generateShortURL()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate short URL"})
+		return
+	}
 
 	urlStore.Lock()
+	defer urlStore.Unlock()
 	urlStore.m[shortURL] = requestBody.URL
-	urlStore.Unlock()
 
-	c.JSON(http.StatusCreated, gin.H{"short_url": baseURL + shortURL})
+	c.JSON(http.StatusCreated, gin.H{"short_url": cfg.BaseURL + shortURL})
 }
 
 func handleGet(c *gin.Context) {
-	id := c.Param("id")
+	shortURL := c.Param("id")
 
 	urlStore.RLock()
-	originalURL, ok := urlStore.m[id]
-	urlStore.RUnlock()
+	defer urlStore.RUnlock()
+	originalURL, exists := urlStore.m[shortURL]
 
-	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "URL not found"})
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "URL not found"})
 		return
 	}
 
@@ -62,12 +68,15 @@ func handleGet(c *gin.Context) {
 }
 
 func main() {
+	cfg := config.LoadConfig()
+
 	r := gin.Default()
 
-	r.POST("/shorten", handlePost)
+	r.POST("/shorten", handlePost) // Update to /shorten
 	r.GET("/:id", handleGet)
 
-	if err := r.Run(":8080"); err != nil {
-		panic(err)
+	if err := r.Run(cfg.ServerAddress); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+		os.Exit(1)
 	}
 }

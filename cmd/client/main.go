@@ -1,28 +1,36 @@
 package main
 
 import (
-	"github.com/gin-gonic/gin"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/hairutdin/url-shortener/config"
 )
 
 func main() {
+	cfg := config.LoadConfig()
+
 	r := gin.Default()
 	r.POST("/shorten", shortenURL)
-	if err := r.Run(":8080"); err != nil {
+	if err := r.Run(cfg.ServerAddress); err != nil {
 		panic(err)
 	}
 }
 
 func shortenURL(c *gin.Context) {
-	longURL := c.PostForm("url")
-	if longURL == "" {
+	var requestBody struct {
+		URL string `json:"url"`
+	}
+	if err := c.ShouldBindJSON(&requestBody); err != nil || requestBody.URL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Empty URL"})
 		return
 	}
 
-	shortenedURL := "http://localhost:8080/short123"
+	cfg := config.LoadConfig()
+	shortenedURL := cfg.BaseURL + "short123"
+
 	c.JSON(http.StatusCreated, gin.H{
-		"long_url":  longURL,
+		"long_url":  requestBody.URL,
 		"short_url": shortenedURL,
 	})
 }

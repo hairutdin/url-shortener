@@ -6,16 +6,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hairutdin/url-shortener/config"
+
 	"github.com/gin-gonic/gin"
 )
+
+var mockConfig = &config.Config{
+	ServerAddress: "localhost:8080",
+	BaseURL:       "http://localhost:8080/",
+}
+
+func createTestContext() (*gin.Context, *httptest.ResponseRecorder) {
+	res := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(res)
+	return c, res
+}
 
 func TestHandlePost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	res := httptest.NewRecorder()
-
-	c, _ := gin.CreateTestContext(res)
-
+	c, res := createTestContext()
 	body := `{"url": "https://example.com"}`
 	c.Request = httptest.NewRequest(http.MethodPost, "/shorten", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -26,7 +36,7 @@ func TestHandlePost(t *testing.T) {
 		t.Errorf("Expected status 201, got %d", res.Code)
 	}
 
-	if !strings.Contains(res.Body.String(), baseURL) {
+	if !strings.Contains(res.Body.String(), mockConfig.BaseURL) {
 		t.Errorf("Expected base URL in response, got %s", res.Body.String())
 	}
 }
@@ -34,10 +44,7 @@ func TestHandlePost(t *testing.T) {
 func TestHandlePostInvalidBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	res := httptest.NewRecorder()
-
-	c, _ := gin.CreateTestContext(res)
-
+	c, res := createTestContext()
 	body := `{"url": ""}`
 	c.Request = httptest.NewRequest(http.MethodPost, "/shorten", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -63,10 +70,8 @@ func TestHandleGet(t *testing.T) {
 	urlStore.m[shortID] = originalURL
 	urlStore.Unlock()
 
-	res := httptest.NewRecorder()
-
-	c, r := gin.CreateTestContext(res)
-
+	c, res := createTestContext()
+	r := gin.Default()
 	r.GET("/:id", handleGet)
 
 	req := httptest.NewRequest(http.MethodGet, "/"+shortID, nil)
@@ -91,10 +96,7 @@ func TestHandleGet(t *testing.T) {
 func TestHandleGetInvalidID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	res := httptest.NewRecorder()
-
-	c, _ := gin.CreateTestContext(res)
-
+	c, res := createTestContext()
 	c.Request = httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
 	handleGet(c)
 
