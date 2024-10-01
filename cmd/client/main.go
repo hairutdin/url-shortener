@@ -7,12 +7,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/hairutdin/url-shortener/config"
+	"github.com/hairutdin/url-shortener/internal/middleware"
+	"go.uber.org/zap"
 )
 
 func main() {
 	cfg := config.LoadConfig()
 
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
 	r := gin.Default()
+
+	r.Use(middleware.Logger(logger))
+
 	r.POST("/", shortenURL(cfg))
 	if err := r.Run(cfg.ServerAddress); err != nil {
 		panic(err)
@@ -53,6 +61,5 @@ func generateShortURL() (string, error) {
 	}
 
 	shortURL := base64.RawURLEncoding.EncodeToString(randomBytes)
-
 	return shortURL, nil
 }

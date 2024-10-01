@@ -6,9 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hairutdin/url-shortener/config"
-
 	"github.com/gin-gonic/gin"
+	"github.com/hairutdin/url-shortener/config"
 )
 
 var mockConfig = &config.Config{
@@ -24,8 +23,8 @@ func createTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 
 func TestHandlePost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
 	c, res := createTestContext()
+
 	body := `{"url": "https://example.com"}`
 	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")

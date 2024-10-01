@@ -22,7 +22,7 @@ func createTestRequest(method, url, body string) (*http.Request, *httptest.Respo
 	return req, recorder
 }
 
-func testShortenURL(c *gin.Context) { // Renamed to avoid conflict
+func testShortenURL(c *gin.Context) {
 	var requestBody struct {
 		URL string `json:"url" binding:"required"`
 	}
@@ -31,7 +31,7 @@ func testShortenURL(c *gin.Context) { // Renamed to avoid conflict
 		return
 	}
 
-	shortenedURL := mockConfig.BaseURL + "short123" // Use mock config for testing
+	shortenedURL := mockConfig.BaseURL + "short123"
 
 	c.JSON(http.StatusCreated, gin.H{
 		"long_url":  requestBody.URL,
