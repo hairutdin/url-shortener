@@ -3,13 +3,13 @@ package main
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"log"
 	"net/http"
-	"os"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hairutdin/url-shortener/config"
+	"github.com/hairutdin/url-shortener/internal/middleware"
+	"go.uber.org/zap"
 )
 
 var urlStore = struct {
@@ -70,13 +70,17 @@ func handleGet(c *gin.Context) {
 func main() {
 	cfg := config.LoadConfig()
 
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
 	r := gin.Default()
+
+	r.Use(middleware.Logger(logger))
 
 	r.POST("/", handlePost)
 	r.GET("/:id", handleGet)
 
 	if err := r.Run(cfg.ServerAddress); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-		os.Exit(1)
+		logger.Fatal("Failed to start server", zap.Error(err))
 	}
 }
