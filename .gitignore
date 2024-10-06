@@ -1,0 +1,32 @@
+# Binaries for programs and plugins
+*.exe
+*.dll
+*.so
+*.dylib
+
+# macOS system files
+.DS_Store
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE configurations
+.idea/
+
+# Command binaries to ignore compiled test binaries or executables
+cmd/shortenertest/shortenertest
+cmd/devopstest/devopstest
+cmd/accrualtest/accrualtest
+cmd/gophermarttest/gophermarttest
+cmd/statictest/statictest
+cmd/random/random
+
+# Allow bin directory but ignore its contents except README.md
+bin/*
+!bin/README.md
