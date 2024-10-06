@@ -60,4 +60,4 @@ Contributions are welcome! Please open an issue or submit a pull request to cont
 
 ### Contact
 
-For inquiries, please reach out to [hairutdinl@protonmail.com].
+For inquiries, please reach out to [hairutdin@protonmail.com].
