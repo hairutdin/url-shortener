@@ -1,8 +1,9 @@
-package main
+package shortener
 
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"io"
 	"net/http"
 	"sync"
 
@@ -27,29 +28,47 @@ func generateShortURL() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-func handlePost(c *gin.Context) {
+func createShortURL(originalURL string) (string, error) {
+	shortURL, err := generateShortURL()
+	if err != nil {
+		return "", err
+	}
+	urlStore.Lock()
+	defer urlStore.Unlock()
+	urlStore.m[shortURL] = originalURL
+
+	return shortURL, nil
+}
+
+func handleShortenPost(c *gin.Context) {
 	cfg := config.LoadConfig()
 
-	var requestBody struct {
-		URL string `json:"url"`
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		return
 	}
 
-	if err := c.ShouldBindJSON(&requestBody); err != nil || requestBody.URL == "" {
+	var requestBody ShortenRequest
+	if err := requestBody.UnmarshalJSON(bodyBytes); err != nil || requestBody.URL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid URL"})
 		return
 	}
 
-	shortURL, err := generateShortURL()
+	shortURL, err := createShortURL(requestBody.URL)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate short URL"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate short URL"})
 		return
 	}
 
-	urlStore.Lock()
-	defer urlStore.Unlock()
-	urlStore.m[shortURL] = requestBody.URL
+	response := ShortenResponse{Result: cfg.BaseURL + shortURL}
+	responseJSON, err := response.MarshalJSON()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal response"})
+		return
+	}
 
-	c.JSON(http.StatusCreated, gin.H{"short_url": cfg.BaseURL + shortURL})
+	c.Data(http.StatusCreated, "application/json", responseJSON)
 }
 
 func handleGet(c *gin.Context) {
@@ -77,7 +96,8 @@ func main() {
 
 	r.Use(middleware.Logger(logger))
 
-	r.POST("/", handlePost)
+	r.POST("/", handleShortenPost)
+	r.POST("/api/shorten", handleShortenPost)
 	r.GET("/:id", handleGet)
 
 	if err := r.Run(cfg.ServerAddress); err != nil {

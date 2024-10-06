@@ -1,4 +1,4 @@
-package main
+package shortener
 
 import (
 	"net/http"
@@ -21,15 +21,15 @@ func createTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 	return c, res
 }
 
-func TestHandlePost(t *testing.T) {
+func TestHandleShortenPost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, res := createTestContext()
 
 	body := `{"url": "https://example.com"}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handlePost(c)
+	handleShortenPost(c)
 
 	if res.Code != http.StatusCreated {
 		t.Errorf("Expected status 201, got %d", res.Code)
@@ -40,15 +40,15 @@ func TestHandlePost(t *testing.T) {
 	}
 }
 
-func TestHandlePostInvalidBody(t *testing.T) {
+func TestHandleShortenPostInvalidBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	c, res := createTestContext()
 	body := `{"url": ""}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handlePost(c)
+	handleShortenPost(c)
 
 	if res.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", res.Code)
