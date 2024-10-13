@@ -1,10 +1,12 @@
 package shortener
 
 import (
+	"compress/gzip"
 	"crypto/rand"
 	"encoding/base64"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -43,7 +45,18 @@ func createShortURL(originalURL string) (string, error) {
 func handleShortenPost(c *gin.Context) {
 	cfg := config.LoadConfig()
 
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	var bodyReader io.Reader = c.Request.Body
+	if c.GetHeader("Content-Encoding") == "gzip" {
+		gz, err := gzip.NewReader(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read gzip body"})
+			return
+		}
+		defer gz.Close()
+		bodyReader = gz
+	}
+
+	bodyBytes, err := io.ReadAll(bodyReader)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
 		return
@@ -66,6 +79,13 @@ func handleShortenPost(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal response"})
 		return
+	}
+
+	if strings.Contains(c.Request.Header.Get("Accept-Encoding"), "gzip") {
+		c.Header("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(c.Writer)
+		defer gz.Close()
+		c.Writer = &middleware.GzipResponseWriter{Writer: gz, ResponseWriter: c.Writer}
 	}
 
 	c.Data(http.StatusCreated, "application/json", responseJSON)
@@ -95,6 +115,7 @@ func main() {
 	r := gin.Default()
 
 	r.Use(middleware.Logger(logger))
+	r.Use(middleware.GzipMiddleware)
 
 	r.POST("/", handleShortenPost)
 	r.POST("/api/shorten", handleShortenPost)
