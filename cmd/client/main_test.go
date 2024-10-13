@@ -58,3 +58,22 @@ func TestClientPost(t *testing.T) {
 		t.Errorf("Expected body %s, got %s", expectedBody, recorder.Body.String())
 	}
 }
+
+func TestClientPostInvalidURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.Default()
+	router.POST("/", testShortenURL)
+
+	body := `{"url": ""}`
+	req, recorder := createTestRequest(http.MethodPost, "/", body)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Errorf("Expected status code %d, got %d", http.StatusBadRequest, recorder.Code)
+	}
+
+	expectedBody := `{"error":"Invalid URL"}`
+	if recorder.Body.String() != expectedBody {
+		t.Errorf("Expected body %s, got %s", expectedBody, recorder.Body.String())
+	}
+}

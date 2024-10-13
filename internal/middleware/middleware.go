@@ -1,11 +1,35 @@
 package middleware
 
 import (
+	"compress/gzip"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
+
+type GzipResponseWriter struct {
+	gin.ResponseWriter
+	Writer io.Writer
+}
+
+func GzipMiddleware(c *gin.Context) {
+	if strings.Contains(c.GetHeader("Accept-Encoding"), "gzip") {
+		gz := gzip.NewWriter(c.Writer)
+		defer gz.Close()
+
+		c.Header("Content-Encoding", "gzip")
+		c.Writer = &GzipResponseWriter{Writer: gz, ResponseWriter: c.Writer}
+	}
+
+	c.Next()
+}
+
+func (w *GzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
 
 func Logger(logger *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
