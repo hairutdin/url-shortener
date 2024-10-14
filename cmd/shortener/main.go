@@ -4,22 +4,31 @@ import (
 	"compress/gzip"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/hairutdin/url-shortener/config"
 	"github.com/hairutdin/url-shortener/internal/middleware"
 	"go.uber.org/zap"
 )
 
+type ShortenedURL struct {
+	UUID        string `json:"uuid"`
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
+
 var urlStore = struct {
 	sync.RWMutex
-	m map[string]string
+	m map[string]ShortenedURL
 }{
-	m: make(map[string]string),
+	m: make(map[string]ShortenedURL),
 }
 
 func generateShortURL() (string, error) {
@@ -30,6 +39,10 @@ func generateShortURL() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+func generateUUID() string {
+	return uuid.New().String()
+}
+
 func createShortURL(originalURL string) (string, error) {
 	shortURL, err := generateShortURL()
 	if err != nil {
@@ -37,9 +50,54 @@ func createShortURL(originalURL string) (string, error) {
 	}
 	urlStore.Lock()
 	defer urlStore.Unlock()
-	urlStore.m[shortURL] = originalURL
-
+	urlStore.m[shortURL] = ShortenedURL{
+		UUID:        generateUUID(),
+		ShortURL:    shortURL,
+		OriginalURL: originalURL,
+	}
 	return shortURL, nil
+}
+
+func loadURLsFromFile(filePath string) error {
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil
+	}
+
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	var urls []ShortenedURL
+	err = json.Unmarshal(fileData, &urls)
+	if err != nil {
+		return err
+	}
+
+	urlStore.Lock()
+	defer urlStore.Unlock()
+	for _, url := range urls {
+		urlStore.m[url.ShortURL] = url
+	}
+
+	return nil
+}
+
+func saveURLsToFile(filePath string) error {
+	urlStore.RLock()
+	defer urlStore.RUnlock()
+
+	urls := make([]ShortenedURL, 0, len(urlStore.m))
+	for _, url := range urlStore.m {
+		urls = append(urls, url)
+	}
+
+	fileData, err := json.Marshal(urls)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filePath, fileData, 0644)
 }
 
 func handleShortenPost(c *gin.Context) {
@@ -74,6 +132,14 @@ func handleShortenPost(c *gin.Context) {
 		return
 	}
 
+	if cfg.FileStoragePath != "" {
+		err := saveURLsToFile(cfg.FileStoragePath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save URL to file"})
+			return
+		}
+	}
+
 	response := ShortenResponse{Result: cfg.BaseURL + shortURL}
 	responseJSON, err := response.MarshalJSON()
 	if err != nil {
@@ -103,12 +169,18 @@ func handleGet(c *gin.Context) {
 		return
 	}
 
-	c.Redirect(http.StatusTemporaryRedirect, originalURL)
+	c.Redirect(http.StatusTemporaryRedirect, originalURL.OriginalURL)
 }
 
 func main() {
 	cfg := config.LoadConfig()
 
+	if cfg.FileStoragePath != "" {
+		err := loadURLsFromFile(cfg.FileStoragePath)
+		if err != nil {
+			zap.S().Fatalf("Failed to load URLs from file: %v", err)
+		}
+	}
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
