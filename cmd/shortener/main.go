@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/hairutdin/url-shortener/config"
+	"github.com/hairutdin/url-shortener/internal/db"
 	"github.com/hairutdin/url-shortener/internal/middleware"
 	"go.uber.org/zap"
 )
@@ -172,6 +174,14 @@ func handleGet(c *gin.Context) {
 	c.Redirect(http.StatusTemporaryRedirect, originalURL.OriginalURL)
 }
 
+func handlePing(c *gin.Context) {
+	if err := db.PingDB(); err != nil {
+		c.JSON(500, gin.H{"status": "Database connection failed"})
+		return
+	}
+	c.JSON(200, gin.H{"status": "Database connection OK"})
+}
+
 func main() {
 	cfg := config.LoadConfig()
 
@@ -184,6 +194,12 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	err := db.ConnectDB(cfg.DatabaseDSN)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.CloseDB()
+
 	r := gin.Default()
 
 	r.Use(middleware.Logger(logger))
@@ -192,6 +208,7 @@ func main() {
 	r.POST("/", handleShortenPost)
 	r.POST("/api/shorten", handleShortenPost)
 	r.GET("/:id", handleGet)
+	r.GET("/ping", handlePing)
 
 	if err := r.Run(cfg.ServerAddress); err != nil {
 		logger.Fatal("Failed to start server", zap.Error(err))
