@@ -12,12 +12,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/hairutdin/url-shortener/config"
+	"github.com/hairutdin/url-shortener/internal/db"
 )
 
 var mockConfig = &config.Config{
 	ServerAddress:   "localhost:8080",
 	BaseURL:         "http://localhost:8080/",
 	FileStoragePath: "/tmp/test-short-url-db.json",
+	DatabaseDSN:     "postgres://postgres:berlin@localhost:5432/testdb?sslmode=disable",
 }
 
 func createTestContext() (*gin.Context, *httptest.ResponseRecorder) {
@@ -230,6 +232,39 @@ func TestLoadURLsFromFile(t *testing.T) {
 	if urlStore.m["short123"].OriginalURL != "https://example.com" {
 		t.Errorf("Expected URL 'https://example.com', got '%s'", urlStore.m["short123"].OriginalURL)
 	}
+}
+
+func TestPingHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Database connected", func(t *testing.T) {
+		err := db.ConnectDB("postgres://postgres:berlin@localhost:5432/testdb?sslmode=disable")
+		if err != nil {
+			t.Fatalf("Failed to connect to the database: %v", err)
+		}
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		c.Request = httptest.NewRequest(http.MethodGet, "/ping", nil)
+		handlePing(c)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", w.Code)
+		}
+	})
+
+	t.Run("Database disconnected", func(t *testing.T) {
+		db.CloseDB()
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+
+		c.Request = httptest.NewRequest(http.MethodGet, "/ping", nil)
+		handlePing(c)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("Expected status 500, got %d", w.Code)
+		}
+	})
 }
 
 func TestMain(t *testing.T) {
