@@ -3,7 +3,7 @@ package shortener
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,8 +11,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/hairutdin/url-shortener/config"
-	"github.com/hairutdin/url-shortener/internal/db"
+	"go.uber.org/zap"
 )
 
 var mockConfig = &config.Config{
@@ -20,6 +21,14 @@ var mockConfig = &config.Config{
 	BaseURL:         "http://localhost:8080/",
 	FileStoragePath: "/tmp/test-short-url-db.json",
 	DatabaseDSN:     "postgres://postgres:berlin@localhost:5432/testdb?sslmode=disable",
+}
+
+func setupTestStorage() {
+	var err error
+	storageInstance, err = initializeStorage(mockConfig)
+	if err != nil {
+		panic("Failed to initialize storage for testing: " + err.Error())
+	}
 }
 
 func createTestContext() (*gin.Context, *httptest.ResponseRecorder) {
@@ -30,6 +39,7 @@ func createTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 
 func TestHandleShortenPost(t *testing.T) {
 	defer os.Remove(mockConfig.FileStoragePath)
+	setupTestStorage()
 
 	gin.SetMode(gin.TestMode)
 	c, res := createTestContext()
@@ -38,7 +48,7 @@ func TestHandleShortenPost(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handleShortenPost(c)
+	handleShortenPost(c, mockConfig)
 
 	if res.Code != http.StatusCreated {
 		t.Errorf("Expected status 201, got %d", res.Code)
@@ -50,14 +60,15 @@ func TestHandleShortenPost(t *testing.T) {
 }
 
 func TestHandleShortenPostInvalidBody(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setupTestStorage()
 
+	gin.SetMode(gin.TestMode)
 	c, res := createTestContext()
 	body := `{"url": ""}`
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handleShortenPost(c)
+	handleShortenPost(c, mockConfig)
 
 	if res.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", res.Code)
@@ -65,7 +76,7 @@ func TestHandleShortenPostInvalidBody(t *testing.T) {
 
 	expectedError := `{"error":"Invalid URL"}`
 	if strings.TrimSpace(res.Body.String()) != expectedError {
-		t.Errorf("Expected 'Expected '%s', got %s", expectedError, res.Body.String())
+		t.Errorf("Expected '%s', got %s", expectedError, res.Body.String())
 	}
 }
 
@@ -78,26 +89,46 @@ func createGzipRequestBody(body string) *bytes.Buffer {
 }
 
 func TestHandleShortenPostWithGzip(t *testing.T) {
+	setupTestStorage()
+
 	gin.SetMode(gin.TestMode)
 	c, res := createTestContext()
 
 	gzipBody := createGzipRequestBody(`{"url": "https://example.com"}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/shorten", gzipBody)
 	c.Request.Header.Set("Content-Encoding", "gzip")
-	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("Accept-Encoding", "gzip")
 
-	handleShortenPost(c)
+	handleShortenPost(c, mockConfig)
 
 	if res.Code != http.StatusCreated {
 		t.Errorf("Expected status 201, got %d", res.Code)
 	}
 
-	if !strings.Contains(res.Body.String(), mockConfig.BaseURL) {
-		t.Errorf("Expected base URL in response, got %s", res.Body.String())
+	if res.Header().Get("Content-Encoding") != "gzip" {
+		t.Errorf("Expected Content-Encoding header to be gzip, got %s", res.Header().Get("Content-Encoding"))
+	}
+
+	gzipReader, err := gzip.NewReader(res.Body)
+	if err != nil {
+		t.Fatalf("Failed to create gzip reader: %v", err)
+	}
+	defer gzipReader.Close()
+
+	decodedBody := new(strings.Builder)
+	if _, err := io.Copy(decodedBody, gzipReader); err != nil {
+		t.Fatalf("Failed to read gzip response: %v", err)
+	}
+
+	expectedContent := `{"result":"` + mockConfig.BaseURL
+	if !strings.Contains(decodedBody.String(), expectedContent) {
+		t.Errorf("Expected response to contain %s, got %s", expectedContent, decodedBody.String())
 	}
 }
 
 func TestHandleShortenPostWithInvalidGzip(t *testing.T) {
+	setupTestStorage()
+
 	gin.SetMode(gin.TestMode)
 	c, res := createTestContext()
 
@@ -106,7 +137,7 @@ func TestHandleShortenPostWithInvalidGzip(t *testing.T) {
 	c.Request.Header.Set("Content-Encoding", "gzip")
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	handleShortenPost(c)
+	handleShortenPost(c, mockConfig)
 
 	if res.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400 for invalid gzip, got %d", res.Code)
@@ -119,23 +150,23 @@ func TestHandleShortenPostWithInvalidGzip(t *testing.T) {
 }
 
 func TestHandleGet(t *testing.T) {
+	setupTestStorage()
 	gin.SetMode(gin.TestMode)
 
-	shortID := "short12345"
+	shortURL := uuid.New().String()
 	originalURL := "https://example.com"
-	urlStore.Lock()
-	urlStore.m[shortID] = ShortenedURL{
-		UUID:        "1",
-		ShortURL:    shortID,
-		OriginalURL: originalURL,
+	validUUID := uuid.New().String()
+
+	err := storageInstance.CreateShortURL(validUUID, shortURL, originalURL)
+	if err != nil {
+		t.Fatalf("Failed to create short URL: %v", err)
 	}
-	urlStore.Unlock()
 
 	c, res := createTestContext()
 	r := gin.Default()
 	r.GET("/:id", handleGet)
 
-	req := httptest.NewRequest(http.MethodGet, "/"+shortID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+shortURL, nil)
 	c.Request = req
 
 	r.ServeHTTP(res, req)
@@ -151,13 +182,11 @@ func TestHandleGet(t *testing.T) {
 }
 
 func TestHandleGetInvalidID(t *testing.T) {
+	setupTestStorage()
 	gin.SetMode(gin.TestMode)
 
 	c, res := createTestContext()
 	c.Request = httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
-
-	urlStore.RLock()
-	defer urlStore.RUnlock()
 
 	handleGet(c)
 
@@ -171,77 +200,10 @@ func TestHandleGetInvalidID(t *testing.T) {
 	}
 }
 
-func TestSaveURLsToFile(t *testing.T) {
-	defer os.Remove(mockConfig.FileStoragePath)
-
-	urlStore.m["short123"] = ShortenedURL{
-		UUID:        "1",
-		ShortURL:    "short123",
-		OriginalURL: "https://example.com",
-	}
-
-	err := saveURLsToFile(mockConfig.FileStoragePath)
-	if err != nil {
-		t.Fatalf("Failed to save URLs to file: %v", err)
-	}
-
-	_, err = os.Stat(mockConfig.FileStoragePath)
-	if os.IsNotExist(err) {
-		t.Fatalf("File was not created: %v", err)
-	}
-}
-
-func resetURLStore() {
-	urlStore.Lock()
-	defer urlStore.Unlock()
-	urlStore.m = make(map[string]ShortenedURL)
-}
-
-func TestLoadURLsFromFile(t *testing.T) {
-	resetURLStore()
-
-	tmpFile, err := os.CreateTemp("", "test_url_store_*.json")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	urls := []ShortenedURL{
-		{UUID: "1", ShortURL: "short123", OriginalURL: "https://example.com"},
-		{UUID: "2", ShortURL: "short456", OriginalURL: "https://another.com"},
-	}
-	fileData, _ := json.Marshal(urls)
-	tmpFile.Write(fileData)
-	tmpFile.Close()
-
-	cfg := &config.Config{
-		FileStoragePath: tmpFile.Name(),
-	}
-
-	err = loadURLsFromFile(cfg.FileStoragePath)
-	if err != nil {
-		t.Fatalf("Failed to load URLs from file: %v", err)
-	}
-
-	urlStore.RLock()
-	defer urlStore.RUnlock()
-	if len(urlStore.m) != 2 {
-		t.Errorf("Expected 2 URLs to be loaded, but got %d", len(urlStore.m))
-	}
-
-	if urlStore.m["short123"].OriginalURL != "https://example.com" {
-		t.Errorf("Expected URL 'https://example.com', got '%s'", urlStore.m["short123"].OriginalURL)
-	}
-}
-
 func TestPingHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("Database connected", func(t *testing.T) {
-		err := db.ConnectDB("postgres://postgres:berlin@localhost:5432/testdb?sslmode=disable")
-		if err != nil {
-			t.Fatalf("Failed to connect to the database: %v", err)
-		}
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 
@@ -252,47 +214,79 @@ func TestPingHandler(t *testing.T) {
 			t.Errorf("Expected status 200, got %d", w.Code)
 		}
 	})
-
-	t.Run("Database disconnected", func(t *testing.T) {
-		db.CloseDB()
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-
-		c.Request = httptest.NewRequest(http.MethodGet, "/ping", nil)
-		handlePing(c)
-
-		if w.Code != http.StatusInternalServerError {
-			t.Errorf("Expected status 500, got %d", w.Code)
-		}
-	})
 }
 
-func TestMain(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "test_url_store_main_*.json")
+func TestMain(m *testing.M) {
+	cfg := config.LoadConfig()
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
+	var err error
+	storageInstance, err = initializeStorage(cfg)
 	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
+		panic("Failed to initialize storage for testing: " + err.Error())
 	}
-	defer os.Remove(tmpFile.Name())
+	defer storageInstance.Close()
 
-	urlData := []ShortenedURL{
-		{UUID: "1", ShortURL: "short123", OriginalURL: "https://example.com"},
+	r := setupRouter(cfg, logger)
+
+	routes := []struct {
+		method string
+		path   string
+		body   io.Reader
+		expect int
+	}{
+		{"POST", "/", strings.NewReader(`{"url": "https://example.com"}`), http.StatusCreated},
+		{"POST", "/api/shorten", strings.NewReader(`{"url": "https://example.com"}`), http.StatusCreated},
+		{"GET", "/ping", nil, http.StatusOK},
+		{"GET", "/nonexistent", nil, http.StatusNotFound},
 	}
-	fileData, _ := json.Marshal(urlData)
-	tmpFile.Write(fileData)
-	tmpFile.Close()
 
-	cfg := &config.Config{
-		FileStoragePath: tmpFile.Name(),
+	hasErrors := false
+	for _, route := range routes {
+		req := httptest.NewRequest(route.method, route.path, route.body)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != route.expect {
+			hasErrors = true
+			logger.Error("Route test failed",
+				zap.String("method", route.method),
+				zap.String("path", route.path),
+				zap.Int("expected", route.expect),
+				zap.Int("got", w.Code),
+			)
+		}
 	}
 
-	err = loadURLsFromFile(cfg.FileStoragePath)
+	if hasErrors {
+		os.Exit(1)
+	}
+
+	exitVal := m.Run()
+	os.Exit(exitVal)
+}
+
+func TestInitializeStorage(t *testing.T) {
+	cfg := &config.Config{DatabaseDSN: mockConfig.DatabaseDSN}
+	storage, err := initializeStorage(cfg)
 	if err != nil {
-		t.Fatalf("Failed to load URLs from file: %v", err)
+		t.Fatalf("Expected no error for PostgreSQL storage, got %v", err)
 	}
+	defer storage.Close()
 
-	urlStore.RLock()
-	defer urlStore.RUnlock()
-	if _, exists := urlStore.m["short123"]; !exists {
-		t.Errorf("Expected URL 'short123' to be loaded")
+	cfg = &config.Config{FileStoragePath: mockConfig.FileStoragePath}
+	storage, err = initializeStorage(cfg)
+	if err != nil {
+		t.Fatalf("Expected no error for file storage, got %v", err)
 	}
+	defer storage.Close()
+
+	cfg = &config.Config{}
+	storage, err = initializeStorage(cfg)
+	if err != nil {
+		t.Fatalf("Expected no error for in-memory storage, got %v", err)
+	}
+	defer storage.Close()
 }

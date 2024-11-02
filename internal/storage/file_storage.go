@@ -1,0 +1,81 @@
+package storage
+
+import (
+	"encoding/json"
+	"errors"
+	"log"
+	"os"
+	"sync"
+)
+
+type FileStorage struct {
+	filePath string
+	mu       sync.RWMutex
+	urls     map[string]string // shortURL -> originalURL
+}
+
+func NewFileStorage(filePath string) (*FileStorage, error) {
+	fs := &FileStorage{filePath: filePath, urls: make(map[string]string)}
+	if err := fs.loadFromFile(); err != nil {
+		return nil, err
+	}
+	return fs, nil
+}
+
+func (f *FileStorage) loadFromFile() error {
+	if _, err := os.Stat(f.filePath); os.IsNotExist(err) {
+		return nil
+	}
+
+	data, err := os.ReadFile(f.filePath)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(data, &f.urls)
+}
+
+func (f *FileStorage) saveToFile() error {
+	log.Println("Saving to file without acquiring lock")
+	data, err := json.Marshal(f.urls)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(f.filePath, data, 0644)
+	if err != nil {
+		log.Println("Error writing to file:", err)
+	}
+	log.Println("File saved successfully in saveToFile")
+	return err
+}
+
+func (f *FileStorage) CreateShortURL(uuid, shortURL, originalURL string) error {
+	log.Println("Attempting to acquire lock in CreateShortURL")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	log.Println("Lock acquired in CreateShortURL")
+
+	f.urls[shortURL] = originalURL
+	return f.saveToFile()
+}
+
+func (f *FileStorage) GetOriginalURL(shortURL string) (string, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	originalURL, exists := f.urls[shortURL]
+	if !exists {
+		return "", errors.New("URL not found")
+	}
+	return originalURL, nil
+}
+
+func (f *FileStorage) Ping() error {
+	return nil
+}
+
+func (f *FileStorage) Close() error {
+	log.Println("Closing FileStorage and saving to file")
+	return f.saveToFile()
+}
