@@ -10,6 +10,7 @@ type Config struct {
 	BaseURL         string
 	FileStoragePath string
 	DatabaseDSN     string
+	StorageType     string
 }
 
 var (
@@ -52,11 +53,19 @@ func LoadConfig() *Config {
 			databaseDSN = *databaseDSNFlag
 		}
 
+		storageType := "memory"
+		if databaseDSN != "" {
+			storageType = "postgres"
+		} else if fileStoragePath != "" {
+			storageType = "file"
+		}
+
 		return &Config{
 			ServerAddress:   serverAddress,
 			BaseURL:         baseURL,
 			FileStoragePath: fileStoragePath,
 			DatabaseDSN:     databaseDSN,
+			StorageType:     storageType,
 		}
 	}
 
@@ -65,5 +74,6 @@ func LoadConfig() *Config {
 		BaseURL:         defaultBaseURL,
 		FileStoragePath: defaultFileStorage,
 		DatabaseDSN:     defaultDatabaseDSN,
+		StorageType:     "memory",
 	}
 }

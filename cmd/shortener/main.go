@@ -6,31 +6,26 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
-	"os"
 	"strings"
-	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/hairutdin/url-shortener/config"
-	"github.com/hairutdin/url-shortener/internal/db"
 	"github.com/hairutdin/url-shortener/internal/middleware"
+	"github.com/hairutdin/url-shortener/internal/storage"
 	"go.uber.org/zap"
 )
 
-type ShortenedURL struct {
-	UUID        string `json:"uuid"`
-	ShortURL    string `json:"short_url"`
-	OriginalURL string `json:"original_url"`
-}
+var storageInstance storage.Storage
 
-var urlStore = struct {
-	sync.RWMutex
-	m map[string]ShortenedURL
-}{
-	m: make(map[string]ShortenedURL),
+func initializeStorage(cfg *config.Config) (storage.Storage, error) {
+	if cfg.DatabaseDSN != "" {
+		return storage.NewPostgresStorage(cfg.DatabaseDSN)
+	} else if cfg.FileStoragePath != "" {
+		return storage.NewFileStorage(cfg.FileStoragePath)
+	}
+	return storage.NewInMemoryStorage(), nil
 }
 
 func generateShortURL() (string, error) {
@@ -45,66 +40,7 @@ func generateUUID() string {
 	return uuid.New().String()
 }
 
-func createShortURL(originalURL string) (string, error) {
-	shortURL, err := generateShortURL()
-	if err != nil {
-		return "", err
-	}
-	urlStore.Lock()
-	defer urlStore.Unlock()
-	urlStore.m[shortURL] = ShortenedURL{
-		UUID:        generateUUID(),
-		ShortURL:    shortURL,
-		OriginalURL: originalURL,
-	}
-	return shortURL, nil
-}
-
-func loadURLsFromFile(filePath string) error {
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil
-	}
-
-	fileData, err := os.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-
-	var urls []ShortenedURL
-	err = json.Unmarshal(fileData, &urls)
-	if err != nil {
-		return err
-	}
-
-	urlStore.Lock()
-	defer urlStore.Unlock()
-	for _, url := range urls {
-		urlStore.m[url.ShortURL] = url
-	}
-
-	return nil
-}
-
-func saveURLsToFile(filePath string) error {
-	urlStore.RLock()
-	defer urlStore.RUnlock()
-
-	urls := make([]ShortenedURL, 0, len(urlStore.m))
-	for _, url := range urlStore.m {
-		urls = append(urls, url)
-	}
-
-	fileData, err := json.Marshal(urls)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(filePath, fileData, 0644)
-}
-
-func handleShortenPost(c *gin.Context) {
-	cfg := config.LoadConfig()
-
+func handleShortenPost(c *gin.Context, cfg *config.Config) {
 	var bodyReader io.Reader = c.Request.Body
 	if c.GetHeader("Content-Encoding") == "gzip" {
 		gz, err := gzip.NewReader(c.Request.Body)
@@ -116,39 +52,27 @@ func handleShortenPost(c *gin.Context) {
 		bodyReader = gz
 	}
 
-	bodyBytes, err := io.ReadAll(bodyReader)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
-		return
+	var requestBody struct {
+		URL string `json:"url" binding:"required"`
 	}
-
-	var requestBody ShortenRequest
-	if err := requestBody.UnmarshalJSON(bodyBytes); err != nil || requestBody.URL == "" {
+	if err := json.NewDecoder(bodyReader).Decode(&requestBody); err != nil || requestBody.URL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid URL"})
 		return
 	}
 
-	shortURL, err := createShortURL(requestBody.URL)
+	shortURL, err := generateShortURL()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate short URL"})
 		return
 	}
 
-	if cfg.FileStoragePath != "" {
-		err := saveURLsToFile(cfg.FileStoragePath)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save URL to file"})
-			return
-		}
-	}
-
-	response := ShortenResponse{Result: cfg.BaseURL + shortURL}
-	responseJSON, err := response.MarshalJSON()
+	err = storageInstance.CreateShortURL(generateUUID(), shortURL, requestBody.URL)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal response"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save URL"})
 		return
 	}
 
+	response := gin.H{"result": cfg.BaseURL + "/" + shortURL}
 	if strings.Contains(c.Request.Header.Get("Accept-Encoding"), "gzip") {
 		c.Header("Content-Encoding", "gzip")
 		gz := gzip.NewWriter(c.Writer)
@@ -156,60 +80,59 @@ func handleShortenPost(c *gin.Context) {
 		c.Writer = &middleware.GzipResponseWriter{Writer: gz, ResponseWriter: c.Writer}
 	}
 
-	c.Data(http.StatusCreated, "application/json", responseJSON)
+	c.JSON(http.StatusCreated, response)
 }
 
 func handleGet(c *gin.Context) {
-	id := c.Param("id")
-
-	urlStore.RLock()
-	defer urlStore.RUnlock()
-	originalURL, exists := urlStore.m[id]
-
-	if !exists {
+	shortURL := c.Param("id")
+	originalURL, err := storageInstance.GetOriginalURL(shortURL)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "URL not found"})
 		return
 	}
-
-	c.Redirect(http.StatusTemporaryRedirect, originalURL.OriginalURL)
+	c.Redirect(http.StatusTemporaryRedirect, originalURL)
 }
 
 func handlePing(c *gin.Context) {
-	if err := db.PingDB(); err != nil {
-		c.JSON(500, gin.H{"status": "Database connection failed"})
+	if err := storageInstance.Ping(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "Database connection failed"})
 		return
 	}
-	c.JSON(200, gin.H{"status": "Database connection OK"})
+	c.JSON(http.StatusOK, gin.H{"status": "Database connection OK"})
 }
 
-func main() {
-	cfg := config.LoadConfig()
-
-	if cfg.FileStoragePath != "" {
-		err := loadURLsFromFile(cfg.FileStoragePath)
-		if err != nil {
-			zap.S().Fatalf("Failed to load URLs from file: %v", err)
-		}
-	}
-	logger, _ := zap.NewProduction()
-	defer logger.Sync()
-
-	err := db.ConnectDB(cfg.DatabaseDSN)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.CloseDB()
-
+func setupRouter(cfg *config.Config, logger *zap.Logger) *gin.Engine {
 	r := gin.Default()
 
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.GzipMiddleware)
 
-	r.POST("/", handleShortenPost)
-	r.POST("/api/shorten", handleShortenPost)
+	r.POST("/", func(c *gin.Context) { handleShortenPost(c, cfg) })
+	r.POST("/api/shorten", func(c *gin.Context) { handleShortenPost(c, cfg) })
 	r.GET("/:id", handleGet)
 	r.GET("/ping", handlePing)
 
+	return r
+}
+
+func main() {
+	cfg := config.LoadConfig()
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
+	var err error
+	storageInstance, err = initializeStorage(cfg)
+	if err != nil {
+		logger.Fatal("Failed to initialize storage", zap.Error(err))
+	}
+	defer storageInstance.Close()
+
+	if err := storageInstance.Ping(); err != nil {
+		logger.Fatal("Storage connection failed", zap.Error(err))
+	}
+	logger.Info("Storage initialized successfully")
+
+	r := setupRouter(cfg, logger)
 	if err := r.Run(cfg.ServerAddress); err != nil {
 		logger.Fatal("Failed to start server", zap.Error(err))
 	}
