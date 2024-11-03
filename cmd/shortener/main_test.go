@@ -3,6 +3,7 @@ package shortener
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/hairutdin/url-shortener/config"
+	"github.com/hairutdin/url-shortener/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -23,12 +25,25 @@ var mockConfig = &config.Config{
 	DatabaseDSN:     "postgres://postgres:berlin@localhost:5432/testdb?sslmode=disable",
 }
 
-func setupTestStorage() {
+func setupTestStorage() (func(), error) {
 	var err error
 	storageInstance, err = initializeStorage(mockConfig)
 	if err != nil {
-		panic("Failed to initialize storage for testing: " + err.Error())
+		return nil, err
 	}
+
+	cleanup := func() {
+		if fileStorage, ok := storageInstance.(*storage.FileStorage); ok {
+			fileStorage.Close()
+			os.Remove(mockConfig.FileStoragePath)
+		}
+	}
+
+	return cleanup, nil
+}
+
+func init() {
+	gin.SetMode(gin.ReleaseMode) // Set Gin to release mode
 }
 
 func createTestContext() (*gin.Context, *httptest.ResponseRecorder) {
@@ -38,8 +53,11 @@ func createTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 }
 
 func TestHandleShortenPost(t *testing.T) {
-	defer os.Remove(mockConfig.FileStoragePath)
-	setupTestStorage()
+	cleanup, err := setupTestStorage()
+	if err != nil {
+		panic("Failed to set up test storage: " + err.Error())
+	}
+	defer cleanup()
 
 	gin.SetMode(gin.TestMode)
 	c, res := createTestContext()
@@ -60,7 +78,11 @@ func TestHandleShortenPost(t *testing.T) {
 }
 
 func TestHandleShortenPostInvalidBody(t *testing.T) {
-	setupTestStorage()
+	cleanup, err := setupTestStorage()
+	if err != nil {
+		panic("Failed to set up test storage: " + err.Error())
+	}
+	defer cleanup()
 
 	gin.SetMode(gin.TestMode)
 	c, res := createTestContext()
@@ -89,7 +111,11 @@ func createGzipRequestBody(body string) *bytes.Buffer {
 }
 
 func TestHandleShortenPostWithGzip(t *testing.T) {
-	setupTestStorage()
+	cleanup, err := setupTestStorage()
+	if err != nil {
+		panic("Failed to set up test storage: " + err.Error())
+	}
+	defer cleanup()
 
 	gin.SetMode(gin.TestMode)
 	c, res := createTestContext()
@@ -127,7 +153,11 @@ func TestHandleShortenPostWithGzip(t *testing.T) {
 }
 
 func TestHandleShortenPostWithInvalidGzip(t *testing.T) {
-	setupTestStorage()
+	cleanup, err := setupTestStorage()
+	if err != nil {
+		panic("Failed to set up test storage: " + err.Error())
+	}
+	defer cleanup()
 
 	gin.SetMode(gin.TestMode)
 	c, res := createTestContext()
@@ -149,16 +179,61 @@ func TestHandleShortenPostWithInvalidGzip(t *testing.T) {
 	}
 }
 
+func TestHandleBatchShortenPost(t *testing.T) {
+	cleanup, err := setupTestStorage()
+	if err != nil {
+		panic("Failed to set up test storage: " + err.Error())
+	}
+	defer cleanup()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.Default()
+
+	router.POST("/api/shorten/batch", func(c *gin.Context) { handleBatchShortenPost(c, mockConfig) })
+
+	batchRequest := `[{
+		"correlation_id": "id1",
+		"original_url": "https://example.com/1"
+    }, {
+        "correlation_id": "id2",
+        "original_url": "https://example.com/2"
+    }]`
+
+	req, _ := http.NewRequest("POST", "/api/shorten/batch", strings.NewReader(batchRequest))
+	req.Header.Set("Content-Type", "application/json")
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if status := recorder.Code; status != http.StatusCreated {
+		t.Errorf("Expected status 201, got %v", status)
+	}
+
+	var response []BatchShortenResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if len(response) != 2 {
+		t.Errorf("Expected 2 shortened URLs in response, got %d", len(response))
+	}
+}
+
 func TestHandleGet(t *testing.T) {
-	setupTestStorage()
+	cleanup, err := setupTestStorage()
+	if err != nil {
+		panic("Failed to set up test storage: " + err.Error())
+	}
+	defer cleanup()
+
 	gin.SetMode(gin.TestMode)
 
 	shortURL := uuid.New().String()
 	originalURL := "https://example.com"
 	validUUID := uuid.New().String()
 
-	err := storageInstance.CreateShortURL(validUUID, shortURL, originalURL)
-	if err != nil {
+	e := storageInstance.CreateShortURL(validUUID, shortURL, originalURL)
+	if e != nil {
 		t.Fatalf("Failed to create short URL: %v", err)
 	}
 
@@ -182,7 +257,12 @@ func TestHandleGet(t *testing.T) {
 }
 
 func TestHandleGetInvalidID(t *testing.T) {
-	setupTestStorage()
+	cleanup, err := setupTestStorage()
+	if err != nil {
+		panic("Failed to set up test storage: " + err.Error())
+	}
+	defer cleanup()
+
 	gin.SetMode(gin.TestMode)
 
 	c, res := createTestContext()

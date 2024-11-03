@@ -60,6 +60,29 @@ func (f *FileStorage) CreateShortURL(uuid, shortURL, originalURL string) error {
 	return f.saveToFile()
 }
 
+func (f *FileStorage) CreateBatchURLs(urls []BatchURLRequest) ([]BatchURLOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var output []BatchURLOutput
+	for _, url := range urls {
+		if _, exists := f.urls[url.ShortURL]; exists {
+			return nil, errors.New("duplicate short URL")
+		}
+		f.urls[url.ShortURL] = url.OriginalURL
+		output = append(output, BatchURLOutput{
+			CorrelationID: url.UUID,
+			ShortURL:      f.filePath + "/" + url.ShortURL,
+		})
+	}
+
+	if err := f.saveToFile(); err != nil {
+		return nil, err
+	}
+
+	return output, nil
+}
+
 func (f *FileStorage) GetOriginalURL(shortURL string) (string, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

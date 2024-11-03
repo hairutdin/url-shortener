@@ -42,6 +42,24 @@ func TestPostgresStorageCreateAndGetURL(t *testing.T) {
 	assert.Equal(t, testOriginalURL, originalURL, "Original URL should match the expected value")
 }
 
+func TestPostgresStorageCreateBatchURLs(t *testing.T) {
+	storage := setupTestDB(t)
+	defer storage.Close()
+
+	batchRequests := []BatchURLRequest{
+		{UUID: uuid.New().String(), ShortURL: "short1", OriginalURL: "https://example.com/1"},
+		{UUID: uuid.New().String(), ShortURL: "short2", OriginalURL: "https://example.com/2"},
+	}
+
+	results, err := storage.CreateBatchURLs(batchRequests)
+	assert.NoError(t, err, "CreateBatchURLs should not return an error")
+	assert.Len(t, results, 2, "There should be two results returned")
+
+	for _, result := range results {
+		assert.NotEmpty(t, result.ShortURL, "Short URL should not be empty")
+	}
+}
+
 func TestPostgresStorageGetOriginalURLNotFound(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

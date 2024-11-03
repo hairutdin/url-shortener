@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+
 	"github.com/jackc/pgx/v5"
 )
 
@@ -34,6 +35,37 @@ func (p *PostgresStorage) CreateShortURL(uuid, shortURL, originalURL string) err
 		"INSERT INTO shortened_urls (uuid, short_url, original_url) VALUES ($1, $2, $3)",
 		uuid, shortURL, originalURL)
 	return err
+}
+
+func (p *PostgresStorage) CreateBatchURLs(urls []BatchURLRequest) ([]BatchURLOutput, error) {
+	tx, err := p.db.Begin(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+
+	outputs := make([]BatchURLOutput, 0, len(urls))
+
+	for _, url := range urls {
+		_, err := tx.Exec(context.Background(),
+			`INSERT INTO shortened_urls (uuid, short_url, original_url) VALUES ($1, $2, $3)`,
+			url.UUID, url.ShortURL, url.OriginalURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert batch URL: %w", err)
+		}
+
+		output := BatchURLOutput{
+			CorrelationID: url.UUID,
+			ShortURL:      url.ShortURL,
+		}
+		outputs = append(outputs, output)
+	}
+
+	if err := tx.Commit(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return outputs, nil
 }
 
 func (p *PostgresStorage) GetOriginalURL(shortURL string) (string, error) {
