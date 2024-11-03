@@ -43,6 +43,35 @@ func TestCreateShortURL(t *testing.T) {
 	assert.Equal(t, testOriginalURL, originalURL, "Original URL should match expected value")
 }
 
+func TestFileStorageBatchURLs(t *testing.T) {
+	fs, cleanup := setupFileStorage()
+	defer cleanup()
+
+	batchRequests := []BatchURLRequest{
+		{
+			UUID:        uuid.New().String(),
+			ShortURL:    "short1",
+			OriginalURL: "https://example.com/1",
+		},
+		{
+			UUID:        uuid.New().String(),
+			ShortURL:    "short2",
+			OriginalURL: "https://example.com/2",
+		},
+	}
+
+	for _, req := range batchRequests {
+		err := fs.CreateShortURL(req.UUID, req.ShortURL, req.OriginalURL)
+		assert.NoError(t, err, "CreateShortURL should not return an error")
+	}
+
+	for _, req := range batchRequests {
+		originalURL, err := fs.GetOriginalURL(req.ShortURL)
+		assert.NoError(t, err, "GetOriginalURL should not return an error")
+		assert.Equal(t, req.OriginalURL, originalURL, "The original URL should match the expected value")
+	}
+}
+
 func TestGetOriginalURLNotFound(t *testing.T) {
 	fs, cleanup := setupFileStorage()
 	defer cleanup()

@@ -26,6 +26,27 @@ func TestInMemoryStorageCreateAndGetURL(t *testing.T) {
 	assert.Equal(t, testOriginalURL, originalURL, "Original URL should match the expected value")
 }
 
+func TestInMemoryStorageBatchCreate(t *testing.T) {
+	memoryStorage := setupInMemoryStorage()
+
+	batchURLs := []BatchURLRequest{
+		{UUID: uuid.New().String(), ShortURL: "short1", OriginalURL: "https://example.com/1"},
+		{UUID: uuid.New().String(), ShortURL: "short2", OriginalURL: "https://example.com/2"},
+	}
+
+	// Test batch creation of short URLs
+	batchOutputs, err := memoryStorage.CreateBatchURLs(batchURLs)
+	assert.NoError(t, err, "CreateBatchURLs should not return an error")
+	assert.Len(t, batchOutputs, len(batchURLs), "The output length should match the input length")
+
+	// Verify each URL was created correctly
+	for i := range batchOutputs {
+		originalURL, err := memoryStorage.GetOriginalURL(batchURLs[i].ShortURL)
+		assert.NoError(t, err, "GetOriginalURL should not return an error")
+		assert.Equal(t, batchURLs[i].OriginalURL, originalURL, "The retrieved URL should match the original URL")
+	}
+}
+
 func TestInMemoryStorageGetOriginalURLNotFound(t *testing.T) {
 	memoryStorage := setupInMemoryStorage()
 

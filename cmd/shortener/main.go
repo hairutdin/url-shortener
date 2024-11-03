@@ -9,11 +9,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/hairutdin/url-shortener/config"
 	"github.com/hairutdin/url-shortener/internal/middleware"
 	"github.com/hairutdin/url-shortener/internal/storage"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -83,6 +84,37 @@ func handleShortenPost(c *gin.Context, cfg *config.Config) {
 	c.JSON(http.StatusCreated, response)
 }
 
+func handleBatchShortenPost(c *gin.Context, cfg *config.Config) {
+	var batchRequest []BatchShortenRequest
+	if err := c.BindJSON(&batchRequest); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	if len(batchRequest) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Empty batch not allowed"})
+		return
+	}
+
+	var batchResponse []BatchShortenResponse
+	for _, req := range batchRequest {
+		shortUUID := uuid.New().String()
+		shortURL := cfg.BaseURL + "/" + shortUUID
+
+		err := storageInstance.CreateShortURL(shortUUID, shortUUID, req.OriginalURL)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create short URL"})
+			return
+		}
+		batchResponse = append(batchResponse, BatchShortenResponse{
+			CorrelationID: req.CorrelationID,
+			ShortURL:      shortURL,
+		})
+	}
+
+	c.JSON(http.StatusCreated, batchResponse)
+}
+
 func handleGet(c *gin.Context) {
 	shortURL := c.Param("id")
 	originalURL, err := storageInstance.GetOriginalURL(shortURL)
@@ -109,6 +141,7 @@ func setupRouter(cfg *config.Config, logger *zap.Logger) *gin.Engine {
 
 	r.POST("/", func(c *gin.Context) { handleShortenPost(c, cfg) })
 	r.POST("/api/shorten", func(c *gin.Context) { handleShortenPost(c, cfg) })
+	r.POST("/api/shorten/batch", func(c *gin.Context) { handleBatchShortenPost(c, cfg) })
 	r.GET("/:id", handleGet)
 	r.GET("/ping", handlePing)
 

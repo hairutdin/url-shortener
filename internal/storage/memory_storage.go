@@ -22,6 +22,26 @@ func (m *InMemoryStorage) CreateShortURL(uuid, shortURL, originalURL string) err
 	return nil
 }
 
+func (m *InMemoryStorage) CreateBatchURLs(urls []BatchURLRequest) ([]BatchURLOutput, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var output []BatchURLOutput
+
+	for _, url := range urls {
+		if _, exists := m.urls[url.ShortURL]; exists {
+			return nil, errors.New("duplicate short URL")
+		}
+		m.urls[url.ShortURL] = url.OriginalURL
+		output = append(output, BatchURLOutput{
+			CorrelationID: url.UUID,
+			ShortURL:      "http://localhost:8080/" + url.ShortURL,
+		})
+	}
+
+	return output, nil
+}
+
 func (m *InMemoryStorage) GetOriginalURL(shortURL string) (string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
