@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: shortener_db
+    restart: always
+    environment:
+      POSTGRES_DB: shortener
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  shortener:
+    build: .
+    container_name: shortener_service
+    depends_on:
+      - postgres
+    environment:
+      STORAGE_TYPE: "postgres"
+      DATABASE_URL: "postgres://user:password@postgres:5432/shortener?sslmode=disable"
+    ports:
+      - "8080:8080"
+
+volumes:
+  pg_data:
