@@ -5,13 +5,15 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/hairutdin/url-shortener/internal/app/http/middleware"
+	"github.com/hairutdin/url-shortener/internal/config"
+
 	"github.com/gin-gonic/gin"
-	"github.com/hairutdin/url-shortener/config"
-	"github.com/hairutdin/url-shortener/internal/middleware"
 	"go.uber.org/zap"
 )
 
@@ -19,8 +21,11 @@ func main() {
 	cfg := config.LoadConfig()
 
 	logger, _ := zap.NewProduction()
-	defer logger.Sync()
-
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			fmt.Printf("logger sync failed: %v\n", err)
+		}
+	}()
 	r := gin.Default()
 
 	r.Use(middleware.Logger(logger))
@@ -28,7 +33,7 @@ func main() {
 	r.Use(middleware.GzipMiddleware)
 
 	r.POST("/", shortenURL(cfg))
-	if err := r.Run(cfg.ServerAddress); err != nil {
+	if err := r.Run(cfg.HTTP.Address); err != nil {
 		panic(err)
 	}
 }
